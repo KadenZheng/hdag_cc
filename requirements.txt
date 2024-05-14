@@ -1,6 +1,9 @@
-gdown==3.13.0
-tensorflow
-keras==2.4.3
-pandas==1.3.4
+gdown
+keras
+pandas
 scikit-learn
-typing_extensions==4.11.0
+scipy
+typing_extensions
+streamlit
+numpy
+tensorflow

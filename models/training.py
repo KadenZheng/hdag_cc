@@ -1,14 +1,14 @@
 import numpy as np
 import pandas as pd
 from sklearn.preprocessing import StandardScaler
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Dense
-from tensorflow.keras.optimizers import Adam
-from tensorflow.keras.callbacks import EarlyStopping
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.utils.data import DataLoader, TensorDataset
 import joblib
 
 # Load your data here
-prop_wdi_final_data = pd.read_csv('../data/prop_wdi_final_data.csv')
+prop_wdi_final_data = pd.read_csv('./data/prop_wdi_final_data.csv')
 print("data received")
 
 # CODE BEFORE NARROWING DOWN FEATURES
@@ -23,7 +23,6 @@ features = features[['Year', 'DME', 'Industry Value Final', 'DfR',
        'Population in urban agglomerations of more than 1 million_volume_multiplied',
        'Population in urban agglomerations of more than 1 million (% of total population)_volume_multiplied']]
 
-# features = features.drop(['Gross Profit', 'Brand Contribution', 'Revenue', 'COGS', 'Operating Expenses'], axis=1)
 targets = prop_wdi_final_data[['Revenue', 'COGS', 'Unit Cases']]
 print("features split")
 
@@ -41,48 +40,102 @@ X_test_scaled = scaler.transform(X_test)
 joblib.dump(scaler, 'scaler.pkl')
 print("scaled")
 
-# Neural network for Revenue
-print("building model revenue")
-model_revenue = Sequential([
-    Dense(128, activation='relu', input_shape=(X_train_scaled.shape[1],)),
-    Dense(128, activation='relu'),
-    Dense(128, activation='relu'),
-    Dense(128, activation='relu'),
-    Dense(1)
-])
-model_revenue.compile(optimizer=Adam(learning_rate=0.003), loss='mse')
+# Convert numpy arrays to torch tensors
+X_train_tensor = torch.tensor(X_train_scaled, dtype=torch.float32)
+y_train_tensor = torch.tensor(y_train.values, dtype=torch.float32)
 
-# Neural network for COGS
-print("building model cogs")
-model_cogs = Sequential([
-    Dense(128, activation='relu', input_shape=(X_train_scaled.shape[1],)),
-    Dense(128, activation='relu'),
-    Dense(128, activation='relu'),
-    Dense(1)
-])
-model_cogs.compile(optimizer=Adam(learning_rate=0.003), loss='mse')
+# Define models using PyTorch
+class RevenueModel(nn.Module):
+    def __init__(self):
+        super(RevenueModel, self).__init__()
+        self.layers = nn.Sequential(
+            nn.Linear(X_train_scaled.shape[1], 128),
+            nn.ReLU(),
+            nn.Linear(128, 128),
+            nn.ReLU(),
+            nn.Linear(128, 128),
+            nn.ReLU(),
+            nn.Linear(128, 128),
+            nn.ReLU(),
+            nn.Linear(128, 1)
+        )
 
-# Neural network for Unit Cases
-print("building model unit cases")
-model_uc = Sequential([
-    Dense(64, activation='relu', input_shape=(X_train_scaled.shape[1],)),
-    Dense(64, activation='relu'),
-    Dense(1)
-])
-model_uc.compile(optimizer=Adam(learning_rate=0.1), loss='mse')
+    def forward(self, x):
+        return self.layers(x)
 
-early_stopping = EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)
+class CogsModel(nn.Module):
+    def __init__(self):
+        super(CogsModel, self).__init__()
+        self.layers = nn.Sequential(
+            nn.Linear(X_train_scaled.shape[1], 128),
+            nn.ReLU(),
+            nn.Linear(128, 128),
+            nn.ReLU(),
+            nn.Linear(128, 128),
+            nn.ReLU(),
+            nn.Linear(128, 1)
+        )
 
-# Add your training code here
-print("training revenue")
-model_revenue.fit(X_train_scaled, y_train['Revenue'], validation_split=0.2, epochs=100, callbacks=[early_stopping], verbose=0)
-print("training cogs")
-model_cogs.fit(X_train_scaled, y_train['COGS'], validation_split=0.2, epochs=100, callbacks=[early_stopping], verbose=0)
-print("training unit cases")
-model_uc.fit(X_train_scaled, y_train['Unit Cases'], validation_split=0.2, epochs=100, callbacks=[early_stopping], verbose=0)
+    def forward(self, x):
+        return self.layers(x)
 
-# Save models
-print("saving models")
-model_revenue.save('model_revenue.h5')
-model_cogs.save('model_cogs.h5')
-model_uc.save('model_uc.h5')
+class UnitCasesModel(nn.Module):
+    def __init__(self):
+        super(UnitCasesModel, self).__init__()
+        self.layers = nn.Sequential(
+            nn.Linear(X_train_scaled.shape[1], 64),
+            nn.ReLU(),
+            nn.Linear(64, 64),
+            nn.ReLU(),
+            nn.Linear(64, 1)
+        )
+
+    def forward(self, x):
+        return self.layers(x)
+
+# Initialize models
+model_revenue = RevenueModel()
+model_cogs = CogsModel()
+model_uc = UnitCasesModel()
+
+# Define optimizers and loss function
+optimizer_revenue = optim.Adam(model_revenue.parameters(), lr=0.003)
+optimizer_cogs = optim.Adam(model_cogs.parameters(), lr=0.003)
+optimizer_uc = optim.Adam(model_uc.parameters(), lr=0.1)
+criterion = nn.MSELoss()
+
+# Training loop for each model
+for epoch in range(100):
+    model_revenue.train()
+    model_cogs.train()
+    model_uc.train()
+    for inputs, targets in DataLoader(TensorDataset(X_train_tensor, y_train_tensor), batch_size=64, shuffle=True):
+        # Revenue model training
+        optimizer_revenue.zero_grad()
+        outputs = model_revenue(inputs)
+        loss = criterion(outputs, targets[:, 0].unsqueeze(1))  # Assuming Revenue is the first column
+        loss.backward()
+        optimizer_revenue.step()
+
+        # cogs model training
+        optimizer_cogs.zero_grad()
+        outputs_cogs = model_cogs(inputs)
+        loss_cogs = criterion(outputs_cogs, targets[:, 1].unsqueeze(1))  # Assuming COGS is the second column
+        loss_cogs.backward()
+        optimizer_cogs.step()
+
+        # unit cases model training
+        optimizer_uc.zero_grad()
+        outputs_uc = model_uc(inputs)
+        loss_uc = criterion(outputs_uc, targets[:, 2].unsqueeze(1))  # Assuming Unit Cases is the third column
+        loss_uc.backward()
+        optimizer_uc.step()
+
+    print(f"Epoch {epoch+1}: Revenue Loss={loss.item():.4f}, COGS Loss={loss_cogs.item():.4f}, Unit Cases Loss={loss_uc.item():.4f}")
+
+# Save the models
+torch.save(model_revenue.state_dict(), 'models/model_revenue.pth')
+torch.save(model_cogs.state_dict(), 'models/model_cogs.pth')
+torch.save(model_uc.state_dict(), 'models/model_uc.pth')
+print("Models saved successfully.")
+
