@@ -16,7 +16,7 @@ PASSWORD = st.secrets["password"]
 
 st.title('Coca-Cola ASP OU Black Box')
 
-# Password input
+# Password input and validation
 def check_password():
     if "password_correct" not in st.session_state:
         st.session_state["password_correct"] = False
@@ -45,6 +45,7 @@ if check_password():
 
     data_files = [f for f in os.listdir('data') if f.endswith('.csv')]
 
+    # Basic instructions for application usage.
     with tab1:
         st.header('Welcome 👋!')
         st.markdown('''
@@ -64,9 +65,11 @@ if check_password():
         st.subheader('Enjoy🎉!')
         st.text('- Harvard Undergraduate Data Analytics Group')
 
+    # Model Dashboard
     with tab2: 
         tabs1, tabs2 = st.tabs(["Model Testing", "Generate Forecasts"])
 
+        # Required features for model prediction
         req_features = ['Year', 'DME', 'Industry Value Final', 'DfR',
                 'Population in urban agglomerations of more than 1 million (% of total population)',
                 'Labor force, total_valmultiplied',
@@ -77,7 +80,7 @@ if check_password():
                 'Population in urban agglomerations of more than 1 million (% of total population)_volume_multiplied']
 
         with st.spinner('Initalizing...'):
-                # Function to install packages
+            # Function to install packages
             def install(package):
                 try:
                     subprocess.check_call([sys.executable, "-m", "pip", "install", package])
@@ -96,7 +99,9 @@ if check_password():
 
         def process_data(data):
             return data
+        
 
+        # Run predictive tasks -> return results and error metrics
         def calculate_statistics(data, return_error_metrics=True):
             features = data.select_dtypes(include=["number"])
             features = features[['Year', 'DME', 'Industry Value Final', 'DfR',
@@ -137,7 +142,7 @@ if check_password():
             r2_uc = r2_score(data['Unit Cases'], y_pred_uc)
             test_loss_uc = mse_uc  # Simplified test loss as MSE for example
 
-            # Create results DataFrame
+            # Create results dataframe
             results_df = pd.DataFrame({
                 'Actual Revenue': data['Revenue'],
                 'Predicted Revenue': y_pred_revenue,
@@ -150,7 +155,13 @@ if check_password():
                 'Unit Cases Residual': data['Unit Cases'] - y_pred_uc,
             })
 
+            integrated_df = data.copy()
+            integrated_df['Revenue'] = y_pred_revenue
+            integrated_df['COGS'] = y_pred_cogs
+            integrated_df['Unit Cases'] = y_pred_uc
+
             if return_error_metrics:
+                # Create error statistics dataframe
                 error_metrics_df = pd.DataFrame({
                     'Test Loss Revenue': [test_loss_revenue],
                     'MSE Revenue': [mse_revenue],
@@ -165,9 +176,9 @@ if check_password():
                     'MAE Unit Cases': [mae_uc],
                     'R² Unit Cases': [r2_uc]
                 })
-                return results_df, error_metrics_df
+                return results_df, integrated_df, error_metrics_df
             else:
-                return results_df
+                return results_df, integrated_df
 
         with st.spinner('Initializing models...'):
             model_revenue = RevenueModel()
@@ -190,6 +201,7 @@ if check_password():
                 default_data = load_data('data/prop_wdi_final_data.csv')
                 training.retrain_models(default_data)
 
+        # Model testing implementation (not for generating forecasts)
         with tabs1:
             with st.spinner('Loading...'):
                 st.subheader('Testing')
@@ -204,7 +216,7 @@ if check_password():
 
                         if st.button('Process Data & Predict', key="predict_button"):
                             result = process_data(editable_data)
-                            results_df, error_metrics_df = calculate_statistics(data, return_error_metrics=True)
+                            results_df, integrated_df, error_metrics_df = calculate_statistics(data, return_error_metrics=True)
                             
                             with st.spinner("Generating predictions..."):
                                 st.write('Model Predictions:')
@@ -233,25 +245,54 @@ if check_password():
                     else:
                         st.error('Uploaded data does not contain the required target variables (Revenue, COGS, Unit Cases) or the required input features.')
 
+        # Generate forecasts implementation (not for testing)
         with tabs2:
             st.subheader('Forecasts')
+            
+            # Option to select a file from the existing data directory
             selected_file = st.selectbox("Choose a CSV file (with Input Features)", data_files)
-            if selected_file:
-                data = load_data(os.path.join('data', selected_file))
+            
+            # Option to upload an external file
+            uploaded_file = st.file_uploader("Or upload a CSV file", type='csv')
+            
+            if selected_file or uploaded_file:
+                if uploaded_file:
+                    data = load_data(uploaded_file)
+                else:
+                    data = load_data(os.path.join('data', selected_file))
 
                 if set(req_features).issubset(data.columns):
                     st.write('Input Data Preview:')
                     editable_inputs = st.data_editor(data, key="data_editor_forecasts")
 
                     if st.button('Process Data & Predict', key="predict_button_forecasts"):
-                            result = process_data(editable_inputs)
-                            results_df = calculate_statistics(data, return_error_metrics=False)
-                            
-                            with st.spinner("Generating predictions..."):
-                                st.write('Model Predictions:')
-                                st.write(results_df)
+                        result = process_data(editable_inputs)
+                        results_df, integrated_df = calculate_statistics(data, return_error_metrics=False)
+                        
+                        with st.spinner("Generating predictions..."):
+                            st.write('Model Predictions:')
+                            st.write(results_df)
 
-                                st.success('Forecasts generated.')
+                            csv_results = results_df.to_csv(index=False).encode('utf-8')
+                            st.download_button(
+                                label="Download Model Predictions as CSV",
+                                data=csv_results,
+                                file_name='model_predictions.csv',
+                                mime='text/csv',
+                            )
+
+                            st.write('Integrated Data with Forecasts:')
+                            st.write(integrated_df)
+
+                            csv_integrated = integrated_df.to_csv(index=False).encode('utf-8')
+                            st.download_button(
+                                label="Download Integrated Data as CSV",
+                                data=csv_integrated,
+                                file_name='integrated_data.csv',
+                                mime='text/csv',
+                            )
+
+                            st.success('Forecasts generated.')
 
                 else:
                     st.error('Uploaded data does not contain one or more of the required input features.')

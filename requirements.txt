@@ -6,4 +6,5 @@ scipy
 typing_extensions
 streamlit
 numpy
-tensorflow
+torch
+torchvision
